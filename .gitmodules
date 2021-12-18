@@ -1,0 +1,6 @@
+[submodule "openpnp-capture"]
+	path = libs/openpnp-capture
+	url = https://github.com/openpnp/openpnp-capture
+[submodule "tflite"]
+	path = libs/tensorflow-lite
+	url = https://github.com/Tanishq-Banyal/tflite
