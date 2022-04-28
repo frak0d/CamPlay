@@ -10,6 +10,7 @@
 #include <filesystem>
 
 #include "colorify.hpp"
+#include "predictor.hpp"
 
 namespace fs = std::filesystem;
 
@@ -61,10 +62,11 @@ auto get_actions(const std::string& config_file)
 
 int main()
 {
+
 try
 {
 	std::vector<std::string> config_folders;
-	for (const auto& entry : fs::directory_iterator("app_configs"))
+	for (const auto& entry : fs::directory_iterator("configs"))
 	{
 		if (entry.is_directory())
 		{
@@ -74,7 +76,7 @@ try
 
 	if (config_folders.empty())
 	{
-		std::cout << "No config folders found. Please put your configs in 'app_configs' folder"_red << std::endl;
+		std::cout << "No configs found. Please put your config in 'configs' folder"_red << std::endl;
 		return -1;
 	}
 
@@ -82,11 +84,13 @@ try
 	
 	auto actions = get_actions(config_folder + "/pose_action");
 	auto program = fs::path(config_folder).stem().string();
-
+	
+	Predictor predictor(config_folder+"/pose_model", 1);
+	
 	int err_cnt = 0;
 	while (true)
 	{
-		std::string prediction; // = tflite->predict(image);
+		const auto& [belief, prediction] = predictor.predictImage();
 
 		if (actions.contains(prediction))
 		{
@@ -115,4 +119,5 @@ catch (const std::exception& e)
 	std::cout << e.what() << std::endl;
 	std::cout << "Exiting due to Fatal Error..."_bldred << std::endl;
 }
+
 }
