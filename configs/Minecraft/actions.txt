@@ -1,0 +1,4 @@
+ 0 none    :
+ 1 shoot   : key Enter
+-2 forward : key w
+ 2 special : type "hello"

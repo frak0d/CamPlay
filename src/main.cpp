@@ -1,3 +1,5 @@
+#include <cstddef>
+#include <cstdlib>
 #include <map>
 #include <chrono>
 #include <thread>
@@ -10,14 +12,16 @@
 #include <filesystem>
 
 #include "colorify.hpp"
+#include "opencv2/core/mat.hpp"
 #include "predictor.hpp"
 
+using namespace std::literals;
 namespace fs = std::filesystem;
 
-bool send_input(const std::string& program, const std::vector<std::string>& keys)
+bool send_input(const std::string& program, const std::string& xdo_args)
 {
-	// send keyboard input to program using platform dependent stuff
-	return false;
+	std::system(("xdotool "s+xdo_args).c_str());
+	return true;
 }
 
 int choose_from_vector(const std::vector<std::string>& vec, const std::string& message)
@@ -41,28 +45,38 @@ int choose_from_vector(const std::vector<std::string>& vec, const std::string& m
 	return choice;
 }
 
+inline void strip_string(std::string& str)
+{
+	str.erase(str.find_last_not_of(' ') + 1); //rtrim
+	str.erase(0, str.find_first_not_of(' ')); //ltrim
+}
+
 auto get_actions(const std::string& config_file)
 {
-	std::map<std::string, std::vector<std::string>> actions;
-	std::ifstream file(config_file); std::string line;
+	size_t id;
+	std::string line;
+	std::string name, cmd;
 
+	std::ifstream file(config_file);
+	std::map<size_t, std::pair<std::string,std::string>> actions;
+	
 	while (std::getline(file, line))
 	{
 		std::stringstream linestream(line);
-		std::string action, key;
-		linestream >> action;
-		while (linestream >> key)
-		{
-			actions[action].push_back(key);
-			key.clear();
-		}
+		linestream >> id;
+		std::getline(linestream, name, ':'); strip_string(name);
+		std::getline(linestream, cmd, '\0'); strip_string(cmd);
+		actions[id] = {name, cmd};
 	}
 	return actions;
 }
 
-int main()
+int main(int argc, char* argv[])
 {
-
+	if (argc != 2) {
+		std::puts("Usage :-\n./CamPlay <delay_ms>");
+		std::exit(-1);
+	}
 try
 {
 	std::vector<std::string> config_folders;
@@ -82,19 +96,20 @@ try
 
 	auto config_folder = config_folders.at(choose_from_vector(config_folders, "Choose a Program Config :-"_bld));
 	
-	auto actions = get_actions(config_folder + "/pose_action");
+	auto actions = get_actions(config_folder + "/actions.txt");
 	auto program = fs::path(config_folder).stem().string();
 	
-	Predictor predictor(config_folder+"/pose_model", 1);
+	Predictor predictor(config_folder+"/model.json");
 	
 	int err_cnt = 0;
 	while (true)
 	{
-		const auto& [belief, prediction] = predictor.predictImage();
+		const auto& [Class, Confidence] = predictor.predictImage();
 
-		if (actions.contains(prediction))
+		if (actions.contains(Class))
 		{
-			if (!send_input(program, actions[prediction]))
+			std::clog << Class << " : " << actions[Class].first << " -> " << Confidence << std::endl;
+			if (!send_input(program, actions[Class].second))
 			{
 				std::cerr << "Unable to Send Input..."_red << std::endl;
 				++err_cnt;
@@ -102,16 +117,16 @@ try
 		}
 		else // to catch errors if pose_model and pose_action do not match
 		{
-			std::cout << "Model Prediction "_red << prediction << " not found in 'pose_action' file, Ignoring..."_red << std::endl;
+			std::cerr << "Model Prediction "_red << Class << " not found in 'actions.txt' file, Ignoring..."_red << std::endl;
 		}
 
-		if (err_cnt > 20)
+		if (err_cnt > 50)
 		{
-			std::cout << "Too many errors, exiting..."_bldred << std::endl;
+			std::cerr << "Too many errors, exiting..."_bldred << std::endl;
 			return -3;
 		}
 		
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		std::this_thread::sleep_for(std::chrono::milliseconds(std::stoul(argv[1])));
 	}
 }
 catch (const std::exception& e)

@@ -1,19 +1,14 @@
 
-project('CamPlay', 'cpp', version: '0.1',
+project('CamPlay', 'cpp', version: '0.2',
         subproject_dir: 'libs', meson_version: '>=0.60',
         default_options: ['optimization=2', 'debug=false',
                           'strip=true', 'b_lto=true',
                           'warning_level=3', 'cpp_std=c++20'])
 
-cmake = import('cmake')
-
-#openpnp_capture = cmake.subproject('openpnp-capture')
-tensorflow_lite = cmake.subproject('tensorflow-lite')
-
 deps = [
     dependency('threads'),
-    openpnp_capture.dependency('openpnp-capture'),
-    tensorflow_lite.dependency('tensorflow-lite')
+    dependency('eigen3'),
+    dependency('opencv4')
 ]
 
 dir_install = meson.current_source_dir() / 'build_output'
@@ -28,7 +23,10 @@ bl_exe = executable(
            'src/main.cpp',
            dependencies: deps,
            install: true,
-           install_dir: dir_install)
+           install_dir: dir_install,
+           include_directories: ['libs/FunctionalPlus/include',
+           						 'libs/frugally-deep/include',
+           						 'libs/nlohmann-json'])
            #cpp_args: ['-Wno-unused-variable',
            #           '-Wno-unused-parameter',
            #           '-Wno-ignored-attributes'])

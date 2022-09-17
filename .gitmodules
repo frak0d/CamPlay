@@ -1,6 +1,6 @@
-[submodule "openpnp-capture"]
-	path = libs/openpnp-capture
-	url = https://github.com/openpnp/openpnp-capture
-[submodule "tflite"]
-	path = libs/tensorflow-lite
-	url = https://github.com/Tanishq-Banyal/tflite
+[submodule "libs/frugally-deep"]
+	path = libs/frugally-deep
+	url = https://github.com/Dobiasd/frugally-deep
+[submodule "libs/FunctionalPlus"]
+	path = libs/FunctionalPlus
+	url = https://github.com/Dobiasd/FunctionalPlus

@@ -1,3 +1,6 @@
+#include "fdeep/tensor.hpp"
+#include "fdeep/tensor_pos.hpp"
+#include "fdeep/tensor_shape.hpp"
 #include <queue>
 #include <string>
 #include <vector>
@@ -9,142 +12,64 @@
 #include <functional>
 #include <string_view>
 
-#include <openpnp-capture.h>
-#include <tensorflow/lite/interpreter.h>
-#include <tensorflow/lite/kernels/register.h>
-#include <tensorflow/lite/string_util.h>
-#include <tensorflow/lite/model.h>
+#include <iostream>
 
-// Returns the top N confidence values over threshold in the provided vector,
-// sorted by confidence in descending order. Taken from tflite Image example.
-template <class T>
-void get_top_n(T* prediction, int prediction_size, size_t num_results,
-               float threshold, std::vector<std::pair<float, int>>* top_results,
-               TfLiteType input_type) {
-  // Will contain top N results in ascending order.
-  std::priority_queue<std::pair<float, int>, std::vector<std::pair<float, int>>,
-                      std::greater<std::pair<float, int>>>
-      top_result_pq;
+#include <fdeep/fdeep.hpp>
 
-  const long count = prediction_size;  // NOLINT(runtime/int)
-  float value = 0.0;
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
 
-  for (int i = 0; i < count; ++i) {
-    switch (input_type) {
-      case kTfLiteFloat32:
-        value = prediction[i];
-        break;
-      case kTfLiteInt8:
-        value = (prediction[i] + 128) / 256.0;
-        break;
-      case kTfLiteUInt8:
-        value = prediction[i] / 255.0;
-        break;
-      default:
-        break;
+void square_crop_resize(int size, const cv::Mat& img_in, cv::Mat& img_out)
+{
+    if (img_in.rows > img_in.cols)
+    {
+        auto crop_region_ref = img_in(cv::Rect{0, (img_in.rows-img_in.cols)/2, img_in.cols, img_in.cols});
+        cv::resize(crop_region_ref, img_out, cv::Size(size, size), cv::INTER_NEAREST);
     }
-    // Only add it if it beats the threshold and has a chance at being in
-    // the top N.
-    if (value < threshold) {
-      continue;
+    else if (img_in.rows < img_in.cols)
+    {
+        auto crop_region_ref = img_in(cv::Rect{(img_in.cols-img_in.rows)/2, 0, img_in.rows, img_in.rows});
+        cv::resize(crop_region_ref, img_out, cv::Size(size, size), cv::INTER_NEAREST);
     }
-
-    top_result_pq.push(std::pair<float, int>(value, i));
-
-    // If at capacity, kick the smallest value out.
-    if (top_result_pq.size() > num_results) {
-      top_result_pq.pop();
+    else // img_in is already square
+    {
+        cv::resize(img_in, img_out, cv::Size(size, size), cv::INTER_NEAREST);
     }
-  }
-
-  // Copy to output vector and reverse into descending order.
-  while (!top_result_pq.empty()) {
-    top_results->push_back(top_result_pq.top());
-    top_result_pq.pop();
-  }
-  std::reverse(top_results->begin(), top_results->end());
 }
 
-
-//template <typename TfDataType>
 class Predictor
 {
-    std::unique_ptr<tflite::FlatBufferModel> model;
-    std::unique_ptr<tflite::Interpreter> interpreter;
-    tflite::ops::builtin::BuiltinOpResolver resolver;
+    cv::Mat image;
+    cv::VideoCapture camera;
+    fdeep::model model;
 	
 public:
-	Predictor(std::string_view model_fname, int thread_num)
-{
-    // Load Model
-    model = tflite::FlatBufferModel::BuildFromFile(model_fname.data());
-    
-    // Initiate Interpreter
-    tflite::InterpreterBuilder(*model.get(), resolver)(&interpreter);
-
-    if (!interpreter)
-    	throw std::runtime_error("predictor: failed to initiate interpreter");
-    
-    if (interpreter->AllocateTensors() != kTfLiteOk)
-    	throw std::runtime_error("predictor: failed to allocate tensors");
-    
-    // Configure the interpreter
-    interpreter->SetAllowFp16PrecisionForFp32(true);
-    interpreter->SetNumThreads(thread_num);
-}
-
-std::tuple<uint8_t, std::string> predictImage()
-{
-    // Get Input Tensor Dimensions
-    int input = interpreter->inputs()[0];
-    auto height = interpreter->tensor(input)->dims->data[1];
-    auto width = interpreter->tensor(input)->dims->data[2];
-    auto channels = interpreter->tensor(input)->dims->data[3];
-
-    // Load Input Image
-    //cv::Mat image;
-
-    // Copy image to input tensor
-    //cv::resize(frame, image, cv::Size(width, height), cv::INTER_NEAREST);
-    //memcpy(interpreter->typed_input_tensor<unsigned char>(0), image.data, image.total() * image.elemSize());
-
-    // Inference
-    interpreter->Invoke();
-    
-    // Get Output
-    int output = interpreter->outputs()[0];
-    TfLiteIntArray *output_dims = interpreter->tensor(output)->dims;
-    auto output_size = output_dims->data[output_dims->size - 1];
-    std::vector<std::pair<float, int>> top_results;
-    float threshold = 0.01f;
-
-    switch (interpreter->tensor(output)->type)
+	Predictor(const std::string& model_fname) : model{fdeep::load_model(model_fname)}
     {
-    case kTfLiteInt32:
-        get_top_n<float>(interpreter->typed_output_tensor<float>(0), output_size, 1, threshold, &top_results, kTfLiteFloat32);
-        break;
-    case kTfLiteUInt8:
-        get_top_n<uint8_t>(interpreter->typed_output_tensor<uint8_t>(0), output_size, 1, threshold, &top_results, kTfLiteUInt8);
-        break;
-    default:
-        fprintf(stderr, "cannot handle output type\n");
-        exit(-1);
+        const auto& shape = model.get_input_shapes();
+        std::cout << shape.size() << ' ' << shape[0].rank() <<std::endl;
+        
+        // prefer lower resolution, if available
+        camera.set(cv::CAP_PROP_FRAME_WIDTH, 320);
+        camera.set(cv::CAP_PROP_FRAME_HEIGHT, 240);
+        
+        if (!camera.open(0))
+            throw std::runtime_error("predictor: failed to open camera");
     }
-    
-    int max_confidence_index;
-    float max_confidence = 0;
-    std::string max_confidence_name;
-    
-    for (auto [confidence, index] : top_results)
+
+    auto predictImage()
     {
-        if (confidence > max_confidence)
-        {
-        	max_confidence = confidence;
-        	max_confidence_index = index;
-        }
+        // Get Input Tensor Dimensions
+        auto size = model.get_input_shapes();
+        cv::Mat raw_image;
+        camera >> raw_image;
+        
+        if (raw_image.empty())
+            throw std::runtime_error("predictor: failed to capture image");
+
+        square_crop_resize(224, raw_image, image); assert(image.isContinuous());
+        auto image_tensor = fdeep::tensor_from_bytes(image.data, image.rows, image.cols, image.channels(), -1.0f, +1.0f);
+        return model.predict_class_with_confidence({image_tensor});
     }
-    
-    return std::make_tuple(max_confidence_index, 
-                           max_confidence_name);
-}
 };
